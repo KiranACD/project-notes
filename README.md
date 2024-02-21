@@ -576,7 +576,15 @@ Let us say there are m categories and each category has n products. The number o
 |---------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
 | Select * from categories where name like "s%"                                              | Select * from categories where name like "s%"                                              |  Select * from categories where name like "s%"                                             | 
 | Select * from products p join categories c on p.c_id = c.id where c.id in []               |
-Select * from products p join categories c where c.id = {1}. Here we run these queries for each category id| Here select the product from categories, but for each product send queries to get details of product |
+Select * from products p join categories c where c.id = {1}. Here we run these queries for each category id | Here select the product from categories, but for each product send queries to get details of product |
+
+The code is the same but JPA could decide to execute the code in any of the three ways. 
+
+1. Whenever using ORM, read the queries that the ORM runs. If not optimal go for native queries. Usually ORMs run m+1 queries. 
+
+2. We can also do this by telling JPA the fetch mode. JPA usually ignores fetch mode. Fetch mode usually works with hibernate.
+
+> https://www.baeldung.com/hibernate-fetchmode, https://www.baeldung.com/spring-data-jpa-query, https://thorben-janssen.com/jpql/
 
 
 ## Repository Pattern
