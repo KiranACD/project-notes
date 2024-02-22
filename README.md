@@ -585,6 +585,16 @@ The code is the same but JPA could decide to execute the code in any of the thre
 
 > https://www.baeldung.com/hibernate-fetchmode, https://www.baeldung.com/spring-data-jpa-query, https://thorben-janssen.com/jpql/
 
+#### Schema Migration and Versioning
+
+ORMs handle table creation in general.
+
+1. We might want to handle the table creation ourselves inorder to make optimizations that the ORM cannot do. 
+2. ORMs do not do versioning of schema. We want to have versioning of database schema for multiple reasons. The primary one is being able to revert to previous schema when we revert to a previous code. In general, we want to track schema changes along with code changes. There are two schema migration/versioning libraries called flybase and liquibase. 
+
+When we use a migration library, we have to maintain a db.migrations folder. When we make code change that also has schema change, we have to create a new SQL file with SQL query of that change. The SQL query is to create or update tables based on the schema changes. These files will be versioned. An additonal table is created in the database to track the versions of schema that have been applied. When we run code, flyway checks the table for last applied schema and will run the queries from subsequent versions.
+
+When we use a schema migration library, we can set ddl-auto to none or validate. Validate is better because then JPA will check if all the required tables have been created for the app to run. 
 
 ## Repository Pattern
 
@@ -650,5 +660,93 @@ There are 4 ways to represent inheritance relationships in database.
 
 > Read https://www.baeldung.com/hibernate-inheritance 
 
+## Why Testing?
+
+As size of codebase increases, interdependence between different parts of the app will increase. Cost of change will increase with increasing interdependence.
+
+No one person can be expected to know about the complete codebase. This can lead to anxiety about changing any part of the code and hence reduces the pace of development. 
+
+Technical debt arises when we make an unoptimal change and in the future continue to rely on this change. 
+
+This where testing helps because it tells us whether making a particular change could break another part of the application. A developer should not just write a feature, but also write automated test cases for the feature. Before releasing a new feature, if we run all the test cases and they pass, then we can confidently release the new feature. Here the underlying assumption is that the test cases are comprehensive which means all the edge cases are also covered by the tests.
+
+There are two ways of writing tests.
+
+1. Write feature -> Write tests -> Submit
+2. Write tests -> Write feature -> Submit
+
+The second is called test-driven development (TDD). TDD forces us to first think about how a user might want to use the feature we developed. 
+
+### Flaky Tests
+
+Flaky tests are unreliable because in some cases they pass and in other cases they fail. Tests become flaky when the code it is testing is itself flaky or the code in the test is flaky. Code is flaky when concurrency leads to inconsistent results.
+
+If our code has concurrency or using random, we need to double check the code for flakiness. 
+
+### Types of Testing
+
+#### Unit Testing
+
+A test for a function A should fail only if the code in the function has bugs. If A calls another function B and there are bugs in B but not in A, the tests for A should not fail. 
+
+The way to do this is to mock function B in the tests so that the test is limited to code in A. Code in B should be tested by another set of tests that cover only B.
+
+Test coverage is the percentage of code being tested by one or more test.
+
+A good test case is input/output pairs. It should not have the function logic in the test function itself. 
+
+#### Integration Testing
+
+Here we test external dependencies of certain functions. Here, all dependencies are also called as in the read world. In an integration test, we will not mock external dependency. Hence, functional tests are usually slower than unit tests. We should not have as many functional tests as unit tests. 
+
+In functional testing, we will mock third party dependencies because these are not usually our code. 
+
+#### Functional Testing
+
+Here we test end-to-end functionality of an app. We will make an API call with an input JSON and compare the output JSON with expected JSON.
+
+> https://www.baeldung.com/junit-5, https://www.baeldung.com/mockito-annotations
+
+### Testing Scenarios 
+
+1. Happy scenarios
+    - These are the inputs we typically expect from a user.
+
+2. Bad scenarios
+    - These are inputs we never expect
+
+3. Corner scenarios 
+    - Here the input provided has a huge potential to result in a bug in the code. 
+
+### Qualities of Unit Tests
+
+A unit test should be fast. It should be written in 3 different sections. First one is arrange, second is act and third is assert. 
+
+In the arrange section, we need to create all the inputs to feed into the function that we want to test. In the act section, we will call the function to test by passing the inputs we created. In the assert section, we will compare the result with the expected result. The expected result should be hardcoded in the test code. 
+
+A unit test should be isolated. Another test should not affect the output of the current test. 
+
+A unit test should be repeatable. The output of the test should be the same for the same input. 
+
+All tests should be self-checking. This means we should not take input from the user for tests. 
+
+Tests should test behaviour and not implementation. This is because even though implementation can change, the behaviour of the function should never change. 
+
+> https://testing.googleblog.com/2013/08/testing-on-toilet-test-behavior-not.html
 
 
+### Mocking
+
+Mocking is hardcoding the response of an external dependency in the function that we want to test.
+
+When mocking, we create test doubles. These are objects that will replace the real objects. For example, when testing controller, we will create doubles of service and repository. 
+
+#### Types of Test Double
+
+1. Mock
+    - A double where you hardcode the return value. 
+    ```
+    when (productRepo.findById(1L))
+        thenReturn(new Product())
+    ```
+    
