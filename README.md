@@ -744,9 +744,204 @@ When mocking, we create test doubles. These are objects that will replace the re
 #### Types of Test Double
 
 1. Mock
-    - A double where you hardcode the return value. 
+    - A double is where you hardcode the return value. 
     ```
     when (productRepo.findById(1L))
         thenReturn(new Product())
     ```
-    
+    ```
+    class ProductServiceTest {
+        test() {
+            when(pr.findById())
+                thenReturn(new Product());
+            when(pr.getCount())
+                thenReturn(5);
+            
+        }
+    }
+    ```
+    - We cannot maintain state in a Mock. 
+
+2. Stub
+    - A class that tries to replicate the behaviour of the real class. It implements the same interface as the dependency.
+    ```
+    class ProductRepositoryStub {
+        int count = 0;
+        
+        createProduct() {
+            count += 1;
+        }
+
+        getCount() {
+            return count;
+        }
+    }
+    ```
+    - The above stub will be used to test the function to get count of products.
+    ```
+    ProductServiceTest {
+        test() {
+            ProductRepositoryStub pr = new ProductRepositoryStub();
+            ProductService ps = new ProductService(pr);
+            ps.createProduct();
+            int c = ps.getCount();
+            assert(c == 1);
+            ps.createProduct();
+            c = ps.getCount();
+            assert(c == 2);
+        }
+    }
+    ```
+    - Here, we pass the ProductRepositoryStub instead of the real ProductRepository.
+
+3. Fake
+    - It is similar to a stub, but the implementation is a lot closer to the real object than the implementation of the stub. It is less hacky than a stub
+    ```
+    ProductRepoFake implements ProductRepo {
+        HashMap<Integer, Product> pc;
+        save(p) {
+            int s = pc.size();
+            pc.put(s+1, p);
+        }
+    }
+    ```
+
+> https://blog.pragmatists.com/test-doubles-fakes-mocks-and-stubs-1a7491dfa3da, https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-best-practices
+
+
+### Testing in Spring
+
+All tests should be written in the test folder. The test folder will have the same structure as the main folder. When writing tests for controllers, services, repositories and other pieces of code, we should follow the same package structure as in the main folder. 
+
+Create a method for each test. Annotate the method for tests with @Test. 
+
+The assertj library provides a variety of semantic assert statements. 
+
+The way to create a mock bean. 
+
+```
+@SpringBootTest
+class ProductControllerTest {
+    @Autowired
+    private ProductController productController;
+
+    @MockBean
+    private ProductService productService
+
+    @MockBean
+    private ProductRepository productRepository;
+
+    @Test
+    void testProductsSameAsService() {
+
+        List<Product> products = new ArrayList<>();
+
+        Product p1 = new Product();
+        p1.setTitle("iPhone 15");
+        products.add(p1);
+
+        Product p2 = new Product();
+        p2.setTitle("iPhone 15 Pro");
+        products.add(p2);
+
+        Product p3 = new Product();
+        p3.setTitle("iPhone 15 Pro Max");
+        products.add(p3);
+
+        when(
+            productService.getAllProducts()
+        ).thenReturn(
+            products
+        )
+
+        ResponseEntity<List<Product>> response = productController.getAllProducts();
+
+        List<Product> productsInResponse = response.getBody();
+        assertEquals(products.size(), productsInResponse.size());
+    }
+
+    @Test 
+    void testNonExistingProductThrowsException() {
+        
+        when(
+            productRepository.findById(10L)
+        ).thenReturn(
+            Optional.empty()
+        );
+
+        assertThrows(
+            ProductDoesNotExistException.class,
+            () -> productController.getSingleProduct(10L)
+        );
+    }
+}
+```
+
+## Authentication and Authorization
+
+The concept of identifying a user is authentication. The concept of granting authority to a user to access select resources. Authentication comes before authorization. 
+
+Authentication based access control and role based access control.
+
+### Authentication Flow
+
+When you need to authenticate, you need an id and a way to validate the id. 
+
+1. Signup
+    - Create an account with name, email, password.
+    - Password is the way the website can authenticate our id in the future. 
+    - Website sends email to verify.
+    - After we verify, our record in the db is marked as verified. 
+
+
+2. Login
+    - Send email and password. If email and password match record in db, then website returns success, else it returns failure.
+
+
+Problems with this flow.
+
+Database can be hacked and users' data can be leaked. With this data, the hacker can login to any user's account. 
+
+Solution to this is to hash the password and then store in the database. The problem with this is that a hacker can create multiple accounts with some common passwords and get the hash value of the password from the website database. Then the hacker can check the users that have the same hash value and this way he gets the password of some users.
+
+Another solution is to hash and salt. When using bcrypt library, the password will be encrypted and each time, it will be encrypted to a different value even if the password is the same. 
+
+The signup will look like this.
+
+```
+signup(email, password) {
+    hp = bcrypt.encrypt(password);
+    db.save(email, hp);
+}
+```
+
+When we try to login, we cannot do something like this.
+
+```
+login(email, password) {
+    hp = bcrypt.encrypt(password);
+    sp = db.get(email);
+    if (hp == sp) return true;
+}
+```
+
+The hp will never equal sp this way. Instead of this, bcrypt provides a method that can verify whether the password could have had the encrypted value stored in the db.
+
+```
+login(email, password) {
+    sp = db.get(email);
+    if (bcrypt.verify(sp, password)) return true;
+    return false;
+}
+```
+
+As HTTP is stateless, we need to send all details needed to fulfil the request. Then the server has to make db calls, run bcrypt and return the response. If done for every request (not just login requests), the server will become slow and hence every request will take lot of time. 
+
+There has to be another solution so that we reduce the time taken for every request. This is where we can use tokens. When a user logs in, the server can create a token for the user if the authentication is successful and store it in the db. This token will have an expiry time. Now, for every subsequent request, the user can send the token to for authentication purpose. 
+
+Even in the above method, we will need to make a db call to get the details associated with the token (username, expiry time etc). We can avoid making the db call by encoding all this information in the token itself. 
+
+However, the above way has a security issue as anyone who gets access to the token can edit information like user id, generate a new token and login as another user. How can resolve this security issue? The solution is JWT. 
+
+
+
