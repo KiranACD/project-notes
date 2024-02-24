@@ -1020,10 +1020,12 @@ In many cases, the resource server and the application are the same.
 
 ```mermaid
 classDiagram
-user: Long id
-user: String name
-user: String email
-user: String hashPassword
+class User {
+  Long id
+  String name
+  String email
+  String hashPassword
+}
 ```
 
 
