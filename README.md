@@ -1001,7 +1001,7 @@ What is the difference between resource server and application? Consider an appl
 ```mermaid
 sequenceDiagram
 User ->> Application: Give me access
-Application --> User: First Login
+Application -->> User: First Login
 User ->> Authorization Server: Do Login
 Note right of Authorization Server: Generates Token
 Authorization Server --> Application: Gives token
