@@ -943,5 +943,79 @@ Even in the above method, we will need to make a db call to get the details asso
 
 However, the above way has a security issue as anyone who gets access to the token can edit information like user id, generate a new token and login as another user. How can resolve this security issue? The solution is JWT. 
 
+What is JWT? It stands for json web token. We first create a json like this.
+
+```
+{
+    "user_id": 12345,
+    "email:: "kiran@scaler.com",
+    "role": ["admin"],
+    "expiry_at": "Tuesday 27 Feb, 2024"
+}
+```
+
+Now, we encode the above json using base64 format and create token. This token can be decoded by anyone. Now, we can change some values in the json generated and create a new token and send it to the server. The server cannot trust this token. In order to trust the token, the server will have to use a secret key to create the token. This secret key is only known to the server. Any token encrypted using this method can be decrypted only by someone with the secret key. Now the server can decrypt the token sent by the user and get all the user details encoded in the token. 
+
+The json forms the part B of JWT. Part C contains the base64 encoding of part A and Part B and the secret key. Part A will have information about the encryption algorithm employed. This part is also base64 encoded. 
+
+```
+verifyToken(token) {
+    a, b, c = token.split(".");
+    d = decrypt(c, secret);
+    if fails :=> invalid token;
+    if (a + "." + b != d) :=> invalid token;
+    return true;
+}
+```
+
+JWT is a self-validating token. It can be validated using the information present in the token itself. We do not need to make database call. 
+
+> https://jwt.io/introduction
+
+Multiple modules of an application may need authentication. 
+
+### OAUTH
+
+Industry wide followed standards for authorization. It defines API contracts with respect to authentication and authorization. It becomes easy for us to use different authentication providers. 
+
+When we build the userservice, we will follow the OAUTH standards to implement authentication and authorization. 
+
+OAUTH says that there are 4 participants in any authorizaton related work.
+
+1. User
+    - User wants to access a resource
+
+2. Resource Server
+    - The application that has the information that the user wants.
+
+3. Application
+    - Service on which user wants to access information.
+
+4. Authorization Server
+    - The service that will manage authorization. In our case, it will be the userservice.
+
+ 
+
+What is the difference between resource server and application? Consider an application that shows you emails on your gmail. In order to authorize, we will login via google. So google is the authorization server. The emails are in Gmail server, so that is the resource server. So application will talk to resource server. 
+
+```mermaid
+sequenceDiagram
+User ->> Application: Give me access
+Application --> User: First Login
+User ->> Authorization Server: Do Login
+Note right of Authorization Server: Generates Token
+Authorization Server --> Application: Gives token
+Application ->> Resource Server: getResource(token)
+Resource Server ->> Authorization Server: verifyToken(token)
+Authorization Server --> Resource Server: True
+Resource Server --> Application: returns emails
+Application --> User: Show emails
+
+```
+
+
+
+
+
 
 
