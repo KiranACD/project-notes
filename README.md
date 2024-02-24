@@ -1003,13 +1003,12 @@ sequenceDiagram
 User ->> Application: Give me access
 Application -->> User: First Login
 User ->> Authorization Server: Do Login
-Note right of Authorization Server: Generates Token
-Authorization Server --> Application: Gives token
+Authorization Server -->> Application: Gives token
 Application ->> Resource Server: getResource(token)
 Resource Server ->> Authorization Server: verifyToken(token)
-Authorization Server --> Resource Server: True
-Resource Server --> Application: returns emails
-Application --> User: Show emails
+Authorization Server -->> Resource Server: True
+Resource Server -->> Application: returns emails
+Application -->> User: Show emails
 
 ```
 
