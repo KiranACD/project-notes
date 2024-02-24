@@ -1020,12 +1020,27 @@ In many cases, the resource server and the application are the same.
 
 ```mermaid
 classDiagram
+
 class User {
   Long id
   String name
   String email
   String hashPassword
+  List<Role> roles
 }
+
+class Role {
+    Long id
+    String name
+}
+
+class Token {
+    Long id
+    String value
+    User user
+    Date expiry
+}
+
 ```
 
 
