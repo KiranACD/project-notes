@@ -1012,6 +1012,19 @@ Application -->> User: Show emails
 
 ```
 
+In many cases, the resource server and the application are the same. 
+
+### Userservice
+
+#### LLD of user service
+
+```mermaid
+classDiagram
+user: Long id
+user: String name
+user: String email
+user: String hashPassword
+```
 
 
 
