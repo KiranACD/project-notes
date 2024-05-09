@@ -99,7 +99,7 @@ Consider an attribute in a class. There are two ways the attribute can be assign
 
 The benefit of the second approach is that it is better to create a dependency outside the class than creating it within the class. Why?
 
-1. We can resuse the same object. 
+1. We can resuse the same object (Object here is the value of the attribute). 
 2. Satisfies the dependency inversion principle which states that class A and class B should be loosely coupled through an interface. 
 3. It makes the code easier to test
 
@@ -107,7 +107,7 @@ Whenever we create an application, there are many common dependencies that have 
 
 Spring has something called beans, which are special objects that we provide to spring, so that they can be injected automatically when needed. Spring takes these objects and puts them in the spring container which is also called application context. 
 
-While spring framework provided dependency injection, a lot of functionalities required for builing an application are provided by spring add-ons. Initially, to include add-ons we had to create an XML file just to configure them.
+While spring framework provided dependency injection, a lot of functionalities required for building an application are provided by spring add-ons. Initially, to include add-ons we had to create an XML file just to configure them.
 
 Springboot made the entire process of including add-ons easy, by automatically configuring add-ons using best practices, while retaining the ability to override it.  
 
@@ -119,7 +119,7 @@ When we have more than one implementation of a service interface, name each of t
 
 #### Repositories
 
-Repositories are written as interfaces that extend JPA
+Repositories are written as interfaces that extend JPA.
 
 #### Models
 
@@ -131,20 +131,31 @@ All tables in SQL need a primary key. We can select an attribute (usually id) an
 
 1. Mapped Superclass
     
-    - Annotate parent class with @MapperSuperclass
-    - Annotate child classes with @Entity
+    - Annotate parent class with @MapperSuperclass.
+    - Annotate child classes with @Entity.
+    - Parent class is an abstract class. This means no object of parent class.
+    - 1 table of each child class with its own and parent's attributes. 
 
 2. Table per class
 
-    - Annotate parent class with @Entity and @Inheritance(strategy = InheritanceType.TABLE)
-    - Annotate child classes with @Entity
+    - Annotate parent class with @Entity and @Inheritance(strategy = InheritanceType.TABLE).
+    - Annotate child classes with @Entity.
+    - There will be a table for all classes with its own and parent attributes. 
+    - There will be a users table, a mentors table, an instructors table, a TAs table with all the attributes in all the tables unlike the joined table.
+    - The Users table will have data of all users who are not mentors or instructors or TAs. 
+    - If a user is both instructor and mentor, their entry will be in the instructors and the mentors table.
 
 3. Joined Table
 
     - @Entity on the parent class.
-    - @Inheritance(strategy=InheritanceType.JOINED) on the parent class
-    - @Entity on the child class
+    - @Inheritance(strategy=InheritanceType.JOINED) on the parent class.
+    - @Entity on the child class.
     - @PrimaryKeyJoinColumn(name="parent_id") on the child class. This is the join column with the parent class.
+    - Every data with parent attributes will be in the parent table. 
+    - Each child class will have a table with attributes specific to the child class. 
+    - The query to get email of every instructor will be slower in this design than the mapped superclass because there we had to query just one table. 
+    - The query to get enail of every user will be faster in this design than the mapped superclass because we have to query a single table here, whereas in the mapped superclass design, we have to do union of all child tables to get emails of all users. 
+    - This is the best design choice in 99% of the cases. 
 
 4. Single Table
 
@@ -154,6 +165,8 @@ All tables in SQL need a primary key. We can select an attribute (usually id) an
     - We can also add @DiscriminatorValue(value="0") to the parent table
     - Annotate the child class with @Entity. Adding this will not lead to a table of the child in the database. It ensures that the attributes of child class will be there in the main table. 
     - Annotate the child class with @DiscriminatorValue(value="1").
+    - There will be one table with all attributes of all parent and child classes. 
+    - We will need to add an attribute called type to identify whether a row is an instructor or TA or mentor. 
     
 
 
@@ -1014,6 +1027,322 @@ Application -->> User: Show emails
 
 In many cases, the resource server and the application are the same. 
 
+### OAUTH Implementation in Spring 
+
+Tokens come as part of request headers. It will be the value of authenticationToken key in the headers. 
+
+Once our application receives a request for resource, which could either be in the resource server seperate from the application or be in the application itself, it will have to verify the token before responding with the resource. 
+
+So we will create a seperate class that will send request to the authorization server to validate the token. 
+
+```
+@Service
+public class AuthenticationCommons {
+    private RestTemplate restTemplate;
+
+    public AuthenticationCommons(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
+
+    public UserDTO validateToken(String token) {
+        ResponseEntity<UserDTO> userDtoResponse = restTemplate.postForEntity(
+            "https://localhost:8181/users/validate" + token,
+            null,
+            UserDTO.class
+        );
+
+        if (userDtoResponse.getBody() == null) {
+            return null;
+        }
+        return userDtoResponse.getBody();
+
+    }
+}
+```
+
+Now let us implement an authorization server. 
+
+> https://docs.spring.io/spring-authorization-server/reference/getting-started.html
+
+Get the dependency and application properties from the link above. It also helps us setup the security config for the server. 
+
+```
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+import java.util.UUID;
+
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.proc.SecurityContext;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+import org.springframework.security.oauth2.core.oidc.OidcScopes;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.authorization.client.InMemoryRegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
+import org.springframework.security.oauth2.server.authorization.config.annotation.web.configurers.OAuth2AuthorizationServerConfigurer;
+import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
+import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	@Order(1)
+	public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http)
+			throws Exception {
+		OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
+		http.getConfigurer(OAuth2AuthorizationServerConfigurer.class)
+			.oidc(Customizer.withDefaults());	// Enable OpenID Connect 1.0
+		http
+			// Redirect to the login page when not authenticated from the
+			// authorization endpoint
+			.exceptionHandling((exceptions) -> exceptions
+				.defaultAuthenticationEntryPointFor(
+					new LoginUrlAuthenticationEntryPoint("/login"),
+					new MediaTypeRequestMatcher(MediaType.TEXT_HTML)
+				)
+			)
+			// Accept access tokens for User Info and/or Client Registration
+			.oauth2ResourceServer((resourceServer) -> resourceServer
+				.jwt(Customizer.withDefaults()));
+
+		return http.build();
+	}
+
+	@Bean
+	@Order(2)
+	public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http)
+			throws Exception {
+		http
+			.authorizeHttpRequests((authorize) -> authorize
+				.anyRequest().authenticated()
+			)
+			// Form login handles the redirect to the login page from the
+			// authorization server filter chain
+			.formLogin(Customizer.withDefaults());
+
+		return http.build();
+	}
+
+	@Bean
+	public UserDetailsService userDetailsService() {
+		UserDetails userDetails = User.withDefaultPasswordEncoder()
+				.username("user")
+				.password("password")
+				.roles("USER")
+				.build();
+
+		return new InMemoryUserDetailsManager(userDetails);
+	}
+
+	@Bean
+	public RegisteredClientRepository registeredClientRepository() {
+		RegisteredClient oidcClient = RegisteredClient.withId(UUID.randomUUID().toString())
+				.clientId("oidc-client")
+				.clientSecret("{noop}secret")
+				.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+				.authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+				.authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
+				.redirectUri("http://127.0.0.1:8080/login/oauth2/code/oidc-client")
+				.postLogoutRedirectUri("http://127.0.0.1:8080/")
+				.scope(OidcScopes.OPENID)
+				.scope(OidcScopes.PROFILE)
+				.clientSettings(ClientSettings.builder().requireAuthorizationConsent(true).build())
+				.build();
+
+		return new InMemoryRegisteredClientRepository(oidcClient);
+	}
+
+	@Bean
+	public JWKSource<SecurityContext> jwkSource() {
+		KeyPair keyPair = generateRsaKey();
+		RSAPublicKey publicKey = (RSAPublicKey) keyPair.getPublic();
+		RSAPrivateKey privateKey = (RSAPrivateKey) keyPair.getPrivate();
+		RSAKey rsaKey = new RSAKey.Builder(publicKey)
+				.privateKey(privateKey)
+				.keyID(UUID.randomUUID().toString())
+				.build();
+		JWKSet jwkSet = new JWKSet(rsaKey);
+		return new ImmutableJWKSet<>(jwkSet);
+	}
+
+	private static KeyPair generateRsaKey() { (6)
+		KeyPair keyPair;
+		try {
+			KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+			keyPairGenerator.initialize(2048);
+			keyPair = keyPairGenerator.generateKeyPair();
+		}
+		catch (Exception ex) {
+			throw new IllegalStateException(ex);
+		}
+		return keyPair;
+	}
+
+	@Bean
+	public JwtDecoder jwtDecoder(JWKSource<SecurityContext> jwkSource) {
+		return OAuth2AuthorizationServerConfiguration.jwtDecoder(jwkSource);
+	}
+
+	@Bean
+	public AuthorizationServerSettings authorizationServerSettings() {
+		return AuthorizationServerSettings.builder().build();
+	}
+
+}
+```
+
+Here, we are using an in memory user model as provided in the userDetailsService function. We want to implment this service with a real model. 
+
+The authorizationServerSettings method sets the default configuration. We can introduce more customization if required.
+
+The jwtDecoder method sets the jwt token decoder method. Here the default implementation uses RSA256 algorithm. This is an asymmetric encryption algorithm. It means the algorithm uses different keys for encryption and decryption. In contrast, a symmetric encryption algorithm uses the same key for encryption and decryption. When we use symmetric encryption algorithms, the encryption and decryption should ideally happen in the same place. 
+
+So, the jwkSource uses RSA256 algorithm to generate a key pair for encryption and decryption. 
+
+Now we look at the registeredClientRepository method. The authorization server will cater to many clients looking to use the APIs provided by the server to perform authentication of users looking to access their resources. 
+
+In our case, productservice, orderservice, paymentservice and the other microservices will be the clients of the authorization server. 
+
+In this case, the clients are being stored in memory, but we will have to implement rela entities to handle the client details and store them in a database. 
+
+UserDetailsService is an interface. In the default implementation, the interface is being used to create users and add them to memory. However, we will want our own implementation so that we can store user details in a database. All we need to do is to provide a class to Spring security that implements the UserDetailsService.
+
+Now we need to implement the models that will enable us to save clients, tokens etc in database. 
+
+> https://docs.spring.io/spring-authorization-server/reference/guides/how-to-jpa.html
+
+Now, we create packages called models, repositories and services. Copy all the relevant classes from above link into files in the respective packages. 
+
+Now, we have to remove the default registeredClientRepository because this saves the client in-memory only. We have a repository that saves the client into the database. 
+
+When we save the client secret into the db, make sure to encrypt it using bcrypt because when we request for authentication, the client secret is converted to bcrypt encryption and then compared with the secret in the db.
+
+We need to connect the authorization server to our user database.
+
+Lazy fetching works when the object is fetched from the same method that the original row was fetched. For example, when the user details are fetched, the roles are lazily fetched and it works when roles are fetched in the same method where the user was fetched. If it is fetched from another method, then it becomes another transaction and we fail to fetch roles. 
+
+Spring security does not let a custom class be converted to JSON using Jackson, we have to explicitly let Spring know that it is safe to convert the custom class to JSON. We can do this by annotating the class with @JsonDeserialize. 
+
+Jakson deserializes/serializes a class by first creating an object of the class by calling a constructor without passing anything. So the class needs to have an empty constructor defined. 
+
+Another good practice, is to create attributes associated with all get methods in the class. Then return the value of these attributes from the correponding get methods.
+
+```
+@JsonDeserialize
+public class CustomUserDetails implements UserDetails {
+
+    private String password;
+    private String username;
+    private Long userId;
+    private List<CustomGrantedAuthority> authorities;
+    private boolean accountNonExpired;
+    private boolean accountNonLocked;
+    private boolean credentialsNonExpired;
+    private boolean enabled;
+
+    
+    public CustomUserDetails() {}
+
+    public CustomUserDetails(User user) {
+        this.password = user.getHashedPassword();
+        this.username = user.getEmail();
+        this.userId = user.getId();
+        List<CustomGrantedAuthority> grantedAuthorities = new ArrayList<>();
+        for (Role role: user.getRoles()) {
+            grantedAuthorities.add(new CustomGrantedAuthority(role));
+        }
+        this.authorities = grantedAuthorities;
+        this.accountNonExpired = true;
+        this.accountNonLocked = true;
+        this.enabled = true;
+        this.credentialsNonExpired = true;
+    }
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return this.authorities;
+    }
+
+    @Override
+    public String getPassword() {
+        return this.password;
+    }
+
+    @Override
+    public String getUsername() {
+        return this.username;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return this.accountNonExpired;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return this.accountNonLocked;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return this.credentialsNonExpired;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return this.enabled;
+    }
+    
+    
+}
+```
+
+The fields in the JSON associated with the token are called claims. We want to be able to add custom claims in the JSON. We have to add the following bean in the security config.
+
+```
+@Bean
+public OAuth2TokenCustomizer<JwtEncodingContext> jwtTokenCustomizer() {
+    return (context) -> {
+        if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())) {
+            context.getClaims().claims((claims) -> {
+                Set<String> roles = AuthorityUtils.authorityListToSet(context.getPrincipal().getAuthorities())
+                        .stream()
+                        .map(c -> c.replaceFirst("^ROLE_", ""))
+                        .collect(Collectors.collectingAndThen(Collectors.toSet(), Collections::unmodifiableSet));
+                claims.put("roles", roles);
+                claims.put("userId", ((CustomUserDetails)context.getPrincipal().getPrincipal()).getUserId());
+            });
+        }
+    };
+}
+```
+
+Now we need to send the token to the productservice. We want to be able to restrict access to some endpoints of productservice to authenticated users or authorized users based on role. So we need to add spring security. 
+
 ### Userservice
 
 #### LLD of user service
@@ -1043,8 +1372,397 @@ class Token {
 
 ```
 
+## Deploying Applications
+
+We want to make the application accessible to the outside world. 
+
+### How Internet Works
+
+How is a browser able to go to google.com and get data from there to show the user. We need a way for the browser to find google.com server and get data from there. An equivalent of address is not enough, we need an equivalent of a location on a map. 
+
+The equivalent of location on a map in the internet is called IP address. IP address allows for efficient routing in the internet. IP address looks like 192.168.1.1, but remembering numbers is hard. It is easier to remember names. 
+
+Taking the example of google.com again, how will the browser know the IP address of google.com? We use a DNS. DNS contains the mapping of domain names and their respective IP addess. We configure the OS to add the DNS IP address. Whenever the browser wants to visit a website, it first goes to the DNS and gets the IP address associated with the domain name. Then the browser goes to the IP address to talk to google.com server. 
+
+IP address has 4 numbers that can take numbers from 0 to 255. Each number can be stored in 8 bits. We have 4 such numbers, so the IP address can be stored in 32 bits. There can be 2^32 unique IP addresses, which is around 2 billion unique addresses. The number of devices connected to the internet is more than the number of unique addresses. 
+
+Inorder to meet the demand, we have network address translators (NAT), a server, which allows us to have an entire internet within the NAT. Each NAT can be configured with a unique IP address that is exposed to the public. But within this IP address, we can have another unique billion IP addresses that is managed by the NAT server. Of course, we can have multiple layers of NAT if required. 
+
+For hosting a website, we need public and static IP address. We also need reliable servers, electricity, internet service providers and geographical distribution of servers. Hosting the website ourselves is possible, but expensive. We can instead use cloud providers to host our website. 
+
+### Managed Infrastructure
+
+In a real production setup, we have to install a database, save backups at frequent intervals, maintain replicas and implement sharding. We would also want to update database version while keeping the system available. We might also want to use Kafka for messaging queue or use Redis for caching etc. Cloud providers offer these services so we dont have to setup these functionalities by ourselves. They will ensure the server is consistently available. 
+
+#### AWS Managed Infrastructure
+
+EC2 stands for elastic compute. Every service of AWS use EC2 behind the scenes. 
+
+Make an account on AWS. Then go to console and click on EC2. Then launch an instance. Name it, then select the OS, then select the specs. Then create an instance. Connect to the instance. SSH into the instance and install all that you need. Then run the app on a port. Make the port visible from the AWS console.
+
+Elastic beanstalk is the manager of our application deployment. It brings together multiple services of AWS to reduce the amount of work we have to do to keep the application running. An application runs on multiple servers. If a server goes down, an alternate server with the application should spin up and serve requests. All the servers are sitting behind a load balancer. The client knows the IP address of the load balancer. The load balancer forwards the requests to the servers so that requests are distributed evenly. 
+
+Elastic beanstalk will manage all of the above functionalities. As a developer, we need to only provide the configuration for these tasks to it. We can tell elastic beanstalk the number of servers, when to add servers, when to reduce servers, the application that is running, the programming language used etc.
+
+Java is a compiled language. We need to package the codebase before deploying it on another computer. We need a jar file of the code base and then we can distribute the application and run it using the command below.
+
+```
+java -jar name-of-jar.jar
+```
+
+AWS's managed infrastructure for database is called RDS. We need to setup a database server that can be accessed from anywhere.
+
+1. Click on create database. 
+2. Select standard create. This allows setting all configuration options including ones for availability, security backups and maintenance. 
+3. Select the database engine (MySQL, PostgreSQL etc). 
+4. Select versions that support the multi-AZ DB cluster. This way there will be data back up in multiple regions of the world for disaster recovery purposes. AZ stands for avaliability zones. 
+5. There will be options to select development, development/test and free tier.
+6. Then select a name for the database.
+7. Fill in the master username and password fields.
+8. As we are in free tier, we will use the free-tier instance as it is the only one available. 
+9. There is an option to enable autoscaling based on a criteria. If this criteria is met, additional storage will be added to the database. 
+10. In connectivitiy, there are options to connect to an EC2 compute resource or not. We will go with not now because we can add a connection later. We will select IPv4. 
+11. Ideally, our database server should accept connection only from our application servers. So we should select No in public access, but for now we will select Yes. Later, we will change the setting.
+12. We can enable automated backups, choose frequency of creating back up and window for choosing when to take backup.
+13. We can enable encryption data. For now, we will choose to disable encryption.
+14. After this, create the database.
+
+Now your database instance is ready.
+
+Now that we have the database url, username and password, we should add it to the application.properties file using environment variables. We can have seperate database instances for production and testing. By adding the database URL using environment variables, we ensure that the URLs of production and testing databases never get mixed up. It also ensures that the URL, username and password cannot be seen even if the codebase is public on Github.
+
+In VSCode, we can add environment variables in Java in the launch.json file. Open the launch.json file and add a key "env" and add the environment variables as values.
+
+```
+{
+    "configurations": [
+
+
+            {
+                "type": "java",
+                "name": "Spring Boot-ProductserviceApplication<productservice>",
+                "request": "launch",
+                "cwd": "${workspaceFolder}",
+                "mainClass": "com.example.productservice.ProductserviceApplication",
+                "projectName": "productservice",
+                "args": "",
+                "envFile": "${workspaceFolder}/.env",
+                "env": {
+                    "PRODUCT_SERVICE_DATABASE_URL": "Value1",
+                    "PRODUCT_SERVICE_DATABASE_USERNAME": "Value2",
+                    "PRODUCT_SERVICE_DATABASE_PASSWORD": "Value3",
+                    "USER_SERVICE_URL": "Value4"
+                }
+            }
+        ]
+}
+```
+
+Now package your code to a .jar file.
+
+If you have tests and some of the variables are passed in using environment variables, then we have to pass the environment variables with the maven command. 
+
+```
+"path-to-mvnw" package -f "path-to-pom.xml" -DPvar1=value1 -Dvar2=value2 
+```
+
+Now, let us set up the elastic beanstalk. Choose application name, domain name and upload the jar file. Then choose custom configuration preset and click on next.
+
+Now, we have to configure service access. Behind the scenes, EBS is a wrapper over other services. We have to give EBS permission to setup the other services required to run the application. In AWS, we give permissions to others via service roles. So we have to 
+
+1. Create a service role
+2. Give permission to that service role
+3. Allow EBS to take that service role
+
+Creating role is fairly straightforward for EBS. Details and steps are provided in the learn more section.
+
+Now, we can configure logging services, security groups and setup the environment variables and launch the environment. EBS will create the required instances. 
+
+The RDS instances that we created for both userservice and productservice are open for connections from anywhere. We should restrict connections to the RDS instances from only the application servers. We will use the virtual private cloud to achieve this. 
+
+Virtual private cloud is a cloud within a cloud. It is a set of virtual machines that are isolated from others. We can configure an instance so that it accepts connections only from those machines that are in the same VPC as it is. 
+
+Every server has an associated security group. A security group is set of rules that determine from where a server can receive requests and to where a server can send requests. We can create a security group where we can specify that the server will receive requests only from specific security groups. We can assign such a security group to a database server so that the server will accept requests only from another specific server or servers that belong to a particular security group. Such a server or group of servers is called jump server. 
+
+How is rolling deployment done? 
+
+1. Bring one server down. (Remove server from load balancer)
+2. Deploy the new version on that server. 
+3. Wait for server to work fine.
+4. Bring the server up. (Connect it to load server)
+
+How will we know if the server is fine? We use health status check. We have to tell EBS the URL that it can use for health check. When the URL responds with 200, then health is fine. By default EBS sends a request to "/". We can set our own endpoint here to gauge health. In springboot projects, we can use an actuator library to setup an endpoint specifically for this purpose. 
+
+Get a domain from namecheap or godaddy or any other website that sells domains. On AWS, use route53 to create a hosted zone with your domain name. Add the namesevers of these hosted zones in the nameserver settings of the website from where you got the domain. 
+
+
+## Cache
+
+Storing the copy of data at some other place to speed up overall response to a request. 
+
+Implement redis to cache results of a request for fast response when the same request is made next time.
+
+Build APIs with the goal of serving a request in <10ms. 
+
+What steps should we take to implement stateless APIs?
+
+An example on caching is when browsers store the IP addresses of domains when it is first fetched from DNS. 
+
+In Spingboot, get the dependency for redis. Define a configuration file with a bean, which is a redistemplate, where we define the type of key and value. We can configure other properties in redistemplate as well. 
+
+> https://docs.spring.io/spring-data/redis/reference/redis.html
+
+## Message Queues
+
+In our case, we will be using it to send email after successful signup. We can even send a link to the user's email to verify their account. 
+
+Userservice has to talk to emailservice. One way is to send a post request to the emailservice from the userservice. Another way is to use a message queue. 
+
+Case 1: Uploading a video on youtube.
+
+After uploading youtube has to,
+
+1. Check for copyrights
+2. Check for adult content
+3. Convert video to different resolutions
+
+and many other jobs before making it visible to public. 
+
+A user would have send the request to upload via an API call. Should the server respond only after all work is done? No, because all the jobs will take a few minutes to finish. So, server sends a response after receiving the video. The jobs on the video will start after that. 
+
+Case 2: Placing an order in Amazon
+
+On placing an order, Amazon should
+
+1. Save to DB.
+2. Send email.
+3. Send SMS.
+4. Send Notification.
+
+and other jobs as well. 
+
+In this case, save to DB is an important step and should happen before we respond with success. The other steps can be delayed and hence we can use message queue to perform these tasks.
+
+The rule of thumb from the two case studies above is that we should do as little as required synchronously. If some jobs can be delayed, delay it. This is the async flow. What is the sync flow? When jobs happen sequentially before sending a response to a request. 
+
+In a messaging queue, there are producers and consumers. The producers put into the queue and the consumers pick from the queue. Consumers will subscribe to the events relevant to it. We can categorize events in the queue into topics. Consumers will subscribe to relevant topics. Producers will put events into relevant topics in the queue. 
+
+The event will remain in the queue till the consumers processes it. If there are multiple instances of a service forming a consumer group, the queue will ensure that the event is consumed by only one instance.  
+
+> Install kafka https://www.conduktor.io/kafka/how-to-install-apache-kafka-on-linux/
+
+> Send email https://www.digitalocean.com/community/tutorials/javamail-example-send-mail-in-java-smtp
 
 
 
+## Payment Process
+
+Payment systems are complex because of
+
+1. Security and privacy. 
+2. There are a large number of payment methods. Our service also talks to a large number of partners. 
+3. There are lot of regulatory requirements. There are thrid party services that certifies that the code of the service satisfies all the regulatory requirements. One such certificate is called PCI-DSS.
+
+Because of such complexity, most organizations prefer to buy third party payment systems. Such systems are called payment gateways.
+
+### Interaction with payment gateway
+
+Should we create the order after payment or before payment. Let us explore the two scenarios.
+
+1. Order created after payment. What happens if payment fails, but money is deducted from the account. In this scenario, we will not know the source of the payment as there is no order. 
+
+2. Order created and then payment. This is industry wide standard because tracking order is possible now. In case payment fails, we know the order the payment is associated with and hence it is easy to refund it. If someone clicks on the pay button twice, then having an order id associated with the payment request lets the server track the duplicate request and cancel it. In this case the order id is the idempotency key. Idempotency key is the attribute that allows us to uniquely identify a requirement and handle duplicates. 
+
+3. Partial Payments. Here payment is split between digital wallet and credit card. This is just an example of one type of partial payment. In this case, even if the wallet payment succeeds, but the card payment fails, it will be easy to handle it because of the order id which is an idempotency key.
+
+Given the above reasons, we should first create the order and then process payment for the order.
+
+We should not call the payment url from the front end. We should first send a request to the orderservice, which will create an order and respond with the order id. Then we send a request with the order id to process payment to the paymentservice. The paymentservice will request the orderservice for the order details. Then the payment service will send a request to the payment gateway which will return a link. Along with the request, the paymentservice will send a callback url that the payment gateway will call when the payment status change. The payment service will return the link to the user in the frontend. The user then opens the link and makes the payment. 
+
+When a payment has succeeded, we may want to do a few things. 
+
+1. Order confirmation email.
+2. Generate invoice.
+3. Update database.
+
+To do this, the server needs to know that the payment is successful. How will the server know?
+
+The callback url is something like "amazon.in/callback?order_id=123". Upon calling the URL, a request is sent to the orderservice for the payment status. The orderservice will send a request for the payment status to the payment gateway. The response is saved in the orders repository and sent to the frontend to update the user. 
+
+A point of failure here is that the callback url may not get called because of any one of the following reasons. 
+
+1. User closed the tab.
+2. User pressed the back button or refreshed the tab.
+3. Internet goes down.
+
+It is impossible to avoid all of the above, so we need a solution that will work inspite of the above scenarios. We can use webhooks. Webhook is an API of our server that is called by a third party when a particular event happens. We can add these webhooks to the payment gateway and tell it to call the webhooks when certain events happen. In this case, the events would be payment success or payments failure. Even in the case of callback url failure, the webhook will update the orders repository. 
+
+The webhook has a chance of failure as well. To cover for this, there is a reconciliation process. Every few hours, the payment gateway will send a file with all the transactions that have happened in the last X hours for that organization. 
 
 
+Floating point numbers or doubles do not store the exact value. They store an approximation of the number. In financial systems, if we store numbers as float/double, it could lead to loss. Hence it is better to store as integer. So, if we have a bill of 10.00, then we have to specify it as 1000.
+
+### Summary
+
+1. User sends request to orderservice - Order is created.
+2. User sends request to paymentservice to create payment link. Paymentservice requests orderservice for order details. Using these details, payment link is created. 
+3. User goes to payment link and makes the payment. 
+4. Then redirected to callback URL. Callback URL requests paymentservice for status of payment. 
+5. Payment gateway calls the paymentservice using the webhook url. 
+
+In the paymentservice, we have to implement
+1. createPaymentLink
+2. getPaymentStatus
+3. handleWebhookEvent
+
+## Search APIs
+
+Intuitively, GET request seems like the natural choice for search APIs. However, most of them are implemented using the POST request.
+
+A search will usually have a search term, filters, sort order etc. Adding all this data to the URL will make it large. Older browser versions used to have a limit on the size of the URL. HTTP protocol does not support attaching a request body to a GET request. 
+
+### Pros of GET vs POST
+
+1. Shareable URL. POST request URL will not contain all the data from search term, filters etc
+2. Ability to cache search results
+
+### Pros of POST vs GET
+
+1. No size limit concerns.
+2. We can easily specify filters and ordering.
+
+### Pagination
+
+Paging - Divide the response into multiple parts. Each part is called a page. 
+
+When we fetch results from the DB, to implement paging, we use offset and limit in the SQL queries. 
+
+In search requests, there are two other parameters. These are the page number and the page size. 
+
+Spring JPA supports pagination. 
+
+```
+Page<Product> findAll(Pageable pageable);
+```
+
+How do we create an object of Pageable?
+
+```
+public Page<Product> getAllProducts(int pageNumber, int pageSize) {
+    // TODO Auto-generated method stub
+    Page<Product> products = productRepository.findAll(PageRequest.of(pageNumber, pageSize));
+    return products;
+}
+```
+
+We take the pageNumber and pageSize via @RequestParams in the controller. 
+
+### Sorting
+
+By default, results are sorted based on the primary key. We can take in paramaters to sort by the attribute that we want and to sort in the ascending or descending order.
+
+While making an object of Pageable, we can specify a third paramter called sort.by() through which we can pass the attribute that we want to sort by and the order we want to sort by.
+
+An example of using this sort interface.
+
+```
+Sort sort = Sort.by("price").ascending().and(Sort.by("name").ascending())
+```
+
+The above would first sort the results by price and if two or more have the same price, it will sort those by name in the ascending order.
+
+### Implementing Search APIs
+
+When we implement search APIs, we usually get the filters in the request body in a POST request. We should get the filters as a list of Filter objects that have the properties called attribute and value. 
+
+```
+class Filter {
+    String attribute;
+    Object value;
+}
+```
+
+The request body will be a JSON like this.
+
+```
+[
+    {
+        "attribute":"brand"
+        "value":["addidas", "puma", "nike"]
+    },
+    {
+        "attribute":"priceLow",
+        "value":2000
+    },
+    {
+        "attribute":"priceHigh",
+        "value":5000
+    }
+]
+```
+
+The controller will take the request body as this.
+
+```
+public <returnType> controller(@RequestBody List<Filter>) {}
+```
+
+### Elastic Search
+
+MySQL is not the ideal storage for performing fast retreival of results when we have multiple filter parameters. It will match the value of each row to select it and this is not a fast process.
+
+We can use Elastic Search, a document database, for this purpose as it is specially optimized for fast reads, filtering and sorting.
+
+
+## Possible Interview Questions
+
+Had a mock interview with an interviewer having 19 years of experience. He presented scenarios similar to real-world projects and asked questions on top of it. Throughout the session, he posed questions that delved deeper into these scenarios, Overall the discussion was good and I had new learnings about springboot features.
+
+1. @Autoconfiguration? only definition wont work, you need to know the working , why it is used in springBoot , what it does. (All the discussions were like this only)
+2. Spring Boot Peer that relies on Spring Framework - Spring Cloud , Spring WebFlux, Spring Batch etc
+
+3. Spring Boot starters
+4. Spring Profiles - spring.profiles.active
+5. Swagger
+6. Health Monitoring
+7. transaction Handling in Spring Boot
+8. Dependency Injection
+9. Necessity of configuration
+10. what is @ComponentScan
+11. how to create a customized starter
+12. relation between spring and spring boot
+13. how framework helps
+14. spring actuator
+15. how u create scripts in CLI(Command Line Interface)
+16. Authentication Vs Authorisation
+17. How you use authentication and authorization in spring and name a few annotations to work with spring security.
+18. Transactions, Isolation levels, Concurrency
+19. optimistic and passive-locking
+20. how to create DI when there is a need to create 2 objects for a particular request
+21. how to achieve SRP in Springboot
+
+He went from beginner to intermediate to advanced concepts.
+
+
+Attended the Backend Project Module Mock Interview (Java Spring/Spring Boot) and cleared it. Here are the list of questions which were asked in the interview
+
+1. What is Dependency Injection
+2. Diff b/w Spring & SpringBoot
+3. Spring Profiles
+4. Logging and Levels of Logging
+6. What are Beans
+7. ⁠What are Annotations
+8. Component Scan Annotation
+9. Swagger
+10. Starting point of Spring Boot Application
+11. What is Singleton DP. Are Spring Beans thread safe?
+12. Can we create Non-Web applications in Spring Boot?
+13. Default Application Server of Spring Boot. Can we replace Apache Tomcat with some other App Server?
+14. Flow of API requests in Spring
+15. Gave a use case and asked to design the backend API implementation for one particular API request
+16. Diff b/w @RequestMapping and @GetMapping
+17. Diff b/w @ReqstController and @Controller
+18. What are the Build Tools use are aware of?
+19. Adding dependencies in Maven
+
+Apart from the topics discussed in the classes, there were few other topics being asked. So it is better to have a basic understanding of those topics as well
